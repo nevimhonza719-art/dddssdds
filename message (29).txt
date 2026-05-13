@@ -1,0 +1,259 @@
+-- [[ tomik.win | Pro ESP + Rage + Movement + Combat + Stretch + Rotating Rainbow X ]] --
+
+if _G.TomikGlobalFix then _G.TomikGlobalFix = false end
+task.wait(0.1)
+_G.TomikGlobalFix = true
+
+local Success, Library = pcall(function()
+    return loadstring(game:HttpGet('https://raw.githubusercontent.com/violin-suzutsuki/LinoriaLib/main/Library.lua'))()
+end)
+
+if not Success or not Library then return end
+
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
+local LocalPlayer = Players.LocalPlayer
+local Camera = workspace.CurrentCamera
+local Mouse = LocalPlayer:GetMouse()
+
+-- [[ CONFIGURATION ]] --
+local Config = {
+    Aimbot = false, Triggerbot = false, FOV = 150, Smooth = 0.15,
+    ESP = false, ESP_Health = true, ESP_Distance = true,
+    FlyEnabled = false, FlySpeed = 250, NoclipEnabled = false, InfJump = false,
+    StretchEnabled = false, StretchValue = 0.81, DarkTextures = false,
+    VoidActive = false, OrbitActive = false, SlingActive = false
+}
+
+-- [[ TOMIK.WIN RAINBOW X-CROSSHAIR SETUP ]] --
+local XSettings = {
+    Size = 25, Gap = 15, Thickness = 4.5, RotationSpeed = 120, RainbowSpeed = 1
+}
+
+local XLines = {
+    L1 = Drawing.new("Line"), L2 = Drawing.new("Line"),
+    L3 = Drawing.new("Line"), L4 = Drawing.new("Line")
+}
+
+local XWatermark = Drawing.new("Text")
+XWatermark.Text = "tomik.win"
+XWatermark.Size = 24
+XWatermark.Center = true
+XWatermark.Outline = true
+XWatermark.Font = 2
+XWatermark.Visible = true
+
+local currentRotation = 0
+
+-- [[ STATE & DRAWING CACHE ]] --
+local orbAngle = 0
+local targetPos = CFrame.new(9000, 9000, 9000)
+local ESP_Cache = {}
+
+-- [[ DARK TEXTURE ENGINE ]] --
+local function applyDarkness()
+    if not Config.DarkTextures then return end
+    task.spawn(function()
+        local descendants = workspace:GetDescendants()
+        for i = 1, #descendants do
+            if not Config.DarkTextures then break end
+            local obj = descendants[i]
+            if obj:IsA("BasePart") and not obj:IsDescendantOf(LocalPlayer.Character) then
+                if obj.Anchored or obj.Size.Magnitude > 5 then
+                    obj.Color = Color3.fromRGB(30, 30, 30)
+                    obj.Material = Enum.Material.SmoothPlastic
+                end
+            end
+            if i % 300 == 0 then task.wait() end
+        end
+    end)
+end
+
+-- [[ ESP OBJECT CREATOR ]] --
+local function createESP(player)
+    local objects = {
+        Box = Drawing.new("Square"),
+        HealthOutline = Drawing.new("Square"),
+        HealthBar = Drawing.new("Square"),
+        Distance = Drawing.new("Text")
+    }
+    objects.Box.Thickness = 1.5; objects.Box.Color = Color3.new(1, 1, 1); objects.Box.Filled = false
+    objects.HealthOutline.Thickness = 1; objects.HealthOutline.Color = Color3.new(0, 0, 0); objects.HealthOutline.Filled = true
+    objects.HealthBar.Thickness = 1; objects.HealthBar.Filled = true
+    objects.Distance.Size = 14; objects.Distance.Center = true; objects.Distance.Outline = true; objects.Distance.Color = Color3.new(1, 1, 1)
+    ESP_Cache[player] = objects
+end
+
+-- [[ UTILITIES ]] --
+local function GetClosestPlayer()
+    local target, closest = nil, math.huge
+    for _, p in pairs(Players:GetPlayers()) do
+        if p ~= LocalPlayer and p.Character and p.Character:FindFirstChild("HumanoidRootPart") then
+            local dist = (LocalPlayer.Character.HumanoidRootPart.Position - p.Character.HumanoidRootPart.Position).Magnitude
+            if dist < closest then closest = dist target = p end
+        end
+    end
+    return target
+end
+
+local function CleanupFly()
+    local hrp = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+    if hrp then
+        for _, v in pairs(hrp:GetChildren()) do if v.Name == "TomikFlyBV" or v.Name == "TomikFlyBG" then v:Destroy() end end
+    end
+end
+
+-- [[ UI SETUP ]] --
+local Window = Library:CreateWindow({ Title = 'tomik.win | Universal', Center = true, AutoShow = true })
+local CombatTab = Window:AddTab('Combat'); local RageTab = Window:AddTab('Rage'); local MovementTab = Window:AddTab('Movement'); local VisualsTab = Window:AddTab('Visuals')
+
+-- COMBAT
+local AimGroup = CombatTab:AddLeftGroupbox('Combat')
+AimGroup:AddToggle('AimToggle', { Text = 'Enable Aimbot', Default = false, Callback = function(v) Config.Aimbot = v end })
+AimGroup:AddToggle('TrigToggle', { Text = 'Enable Triggerbot', Default = false, Callback = function(v) Config.Triggerbot = v end })
+AimGroup:AddSlider('AimFOV', { Text = 'FOV', Default = 150, Min = 0, Max = 800, Rounding = 0, Callback = function(v) Config.FOV = v end })
+AimGroup:AddSlider('AimSmooth', { Text = 'Smooth', Default = 0.15, Min = 0.05, Max = 1, Rounding = 2, Callback = function(v) Config.Smooth = v end })
+
+-- RAGE
+local RageGroup = RageTab:AddLeftGroupbox('Exploits')
+RageGroup:AddToggle('VoidTgl', { Text = 'VOID', Default = false, Callback = function(v) Config.VoidActive = v end })
+RageGroup:AddToggle('OrbTgl', { Text = 'ORBIT', Default = false, Callback = function(v) Config.OrbitActive = v end })
+RageTab:AddRightGroupbox('Bypasses'):AddToggle('SlingTgl', { Text = 'Bypass Slingshot', Default = false, Callback = function(v) Config.SlingActive = v end })
+
+-- MOVEMENT
+local FlyGroup = MovementTab:AddLeftGroupbox('Flight')
+FlyGroup:AddToggle('FlyToggle', { Text = 'Fly', Default = false, Callback = function(v) Config.FlyEnabled = v if not v then CleanupFly() end end }):AddKeyPicker('FlyKey', { Default = 'F', NoUI = false, Text = 'Fly' })
+FlyGroup:AddSlider('FlySpeed', { Text = 'Speed', Default = 250, Min = 10, Max = 1000, Rounding = 0, Callback = function(v) Config.FlySpeed = v end })
+local MoveMisc = MovementTab:AddRightGroupbox('Misc')
+MoveMisc:AddToggle('InfJumpToggle', { Text = 'Infinite Jump', Default = false, Callback = function(v) Config.InfJump = v end })
+MoveMisc:AddToggle('NoclipToggle', { Text = 'Noclip', Default = false, Callback = function(v) Config.NoclipEnabled = v end })
+
+-- VISUALS
+local VisGroup = VisualsTab:AddLeftGroupbox('ESP Settings')
+VisGroup:AddToggle('ESPToggle', { Text = 'Enable Box ESP', Default = false, Callback = function(v) Config.ESP = v end })
+VisGroup:AddToggle('HealthToggle', { Text = 'Show Healthbar', Default = true, Callback = function(v) Config.ESP_Health = v end })
+VisGroup:AddToggle('DistToggle', { Text = 'Show Distance', Default = true, Callback = function(v) Config.ESP_Distance = v end })
+
+local WorldGroup = VisualsTab:AddRightGroupbox('Visual Misc')
+WorldGroup:AddToggle('DarkToggle', { Text = 'Dark Textures', Default = false, Callback = function(v) Config.DarkTextures = v if v then applyDarkness() end end })
+WorldGroup:AddToggle('StretchToggle', { Text = 'Stretch Res', Default = false, Callback = function(v) Config.StretchEnabled = v end })
+WorldGroup:AddSlider('StretchSlider', { Text = 'Stretch Factor', Default = 0.81, Min = 0.1, Max = 2, Rounding = 2, Callback = function(v) Config.StretchValue = v end })
+
+-- [[ CORE LOOPS ]] --
+UserInputService.JumpRequest:Connect(function()
+    if Config.InfJump and LocalPlayer.Character then
+        local hum = LocalPlayer.Character:FindFirstChildOfClass("Humanoid")
+        if hum then hum:ChangeState("Jumping") end
+    end
+end)
+
+RunService.Heartbeat:Connect(function()
+    local hrp = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+    if not hrp then return end
+    if Config.VoidActive then hrp.CFrame = CFrame.new(hrp.Position.X + 1e8, 1e5, hrp.Position.Z + 1e8) end
+    if Config.OrbitActive then
+        local target = GetClosestPlayer()
+        if target and target.Character and target.Character:FindFirstChild("HumanoidRootPart") then
+            orbAngle = orbAngle + 0.15
+            hrp.CFrame = CFrame.new(target.Character.HumanoidRootPart.Position + Vector3.new(math.cos(orbAngle)*7, 5, math.sin(orbAngle)*7), target.Character.HumanoidRootPart.Position)
+        end
+    end
+    if Config.SlingActive then
+        for _, p in pairs(Players:GetPlayers()) do
+            if p ~= LocalPlayer and p.Character and p.Character:FindFirstChild("HumanoidRootPart") then p.Character.HumanoidRootPart.CFrame = targetPos end 
+        end
+    end
+    if Config.FlyEnabled then
+        local bv = hrp:FindFirstChild("TomikFlyBV") or Instance.new("BodyVelocity", hrp)
+        bv.Name = "TomikFlyBV"; bv.MaxForce = Vector3.new(math.huge, math.huge, math.huge)
+        local bg = hrp:FindFirstChild("TomikFlyBG") or Instance.new("BodyGyro", hrp)
+        bg.Name = "TomikFlyBG"; bg.MaxTorque = Vector3.new(math.huge, math.huge, math.huge); bg.CFrame = Camera.CFrame
+        local dir = Vector3.zero
+        if UserInputService:IsKeyDown(Enum.KeyCode.W) then dir += Camera.CFrame.LookVector end
+        if UserInputService:IsKeyDown(Enum.KeyCode.S) then dir -= Camera.CFrame.LookVector end
+        if UserInputService:IsKeyDown(Enum.KeyCode.A) then dir -= Camera.CFrame.RightVector end
+        if UserInputService:IsKeyDown(Enum.KeyCode.D) then dir += Camera.CFrame.RightVector end
+        bv.Velocity = dir * Config.FlySpeed
+    end
+    if Config.NoclipEnabled then for _, p in pairs(LocalPlayer.Character:GetDescendants()) do if p:IsA("BasePart") then p.CanCollide = false end end end
+end)
+
+RunService.RenderStepped:Connect(function(delta)
+    UserInputService.MouseIconEnabled = false
+    local mouseLoc = UserInputService:GetMouseLocation()
+    local isRightClickHolding = UserInputService:IsMouseButtonPressed(Enum.UserInputType.MouseButton2)
+
+    -- RAINBOW CROSSHAIR LOGIC
+    local Hue = (tick() * XSettings.RainbowSpeed) % 1
+    local Color = Color3.fromHSV(Hue, 0.7, 1)
+    currentRotation = currentRotation + (XSettings.RotationSpeed * delta)
+    
+    local function getRotatedOffset(angleDeg, distance)
+        local rad = math.rad(angleDeg)
+        return Vector2.new(math.cos(rad) * distance, math.sin(rad) * distance)
+    end
+
+    local angles = {45, 135, 225, 315}
+    local lineKeys = {"L1", "L2", "L3", "L4"}
+    for i, key in ipairs(lineKeys) do
+        local line = XLines[key]
+        local baseAngle = angles[i] + currentRotation
+        line.Visible = true; line.Color = Color; line.Thickness = XSettings.Thickness; line.Transparency = 1
+        line.From = mouseLoc + getRotatedOffset(baseAngle, XSettings.Gap)
+        line.To = mouseLoc + getRotatedOffset(baseAngle, XSettings.Gap + XSettings.Size)
+    end
+
+    XWatermark.Position = mouseLoc + Vector2.new(0, XSettings.Gap + XSettings.Size + 20)
+    XWatermark.Color = Color
+
+    -- STRETCH & ESP
+    if Config.StretchEnabled then Camera.CFrame = Camera.CFrame * CFrame.new(0,0,0,1,0,0,0,Config.StretchValue,0,0,0,1) end
+
+    for _, p in pairs(Players:GetPlayers()) do
+        if p == LocalPlayer then continue end
+        if not ESP_Cache[p] then createESP(p) end
+        local draw = ESP_Cache[p]; local char = p.Character; local hum = char and char:FindFirstChildOfClass("Humanoid"); local root = char and char:FindFirstChild("HumanoidRootPart")
+        if Config.ESP and char and hum and root and hum.Health > 0 then
+            local pos, onScreen = Camera:WorldToViewportPoint(root.Position)
+            if onScreen then
+                local top = Camera:WorldToViewportPoint((root.CFrame * CFrame.new(0, 3, 0)).Position)
+                local bottom = Camera:WorldToViewportPoint((root.CFrame * CFrame.new(0, -3.5, 0)).Position)
+                local h = math.abs(top.Y - bottom.Y); local w = h * 0.6
+                draw.Box.Size = Vector2.new(w, h); draw.Box.Position = Vector2.new(pos.X - w/2, pos.Y - h/2); draw.Box.Visible = true
+                if Config.ESP_Health then
+                    local healthPct = hum.Health / hum.MaxHealth; local barHeight = h * healthPct
+                    draw.HealthOutline.Size = Vector2.new(4, h); draw.HealthOutline.Position = Vector2.new(pos.X - w/2 - 6, pos.Y - h/2); draw.HealthOutline.Visible = true
+                    draw.HealthBar.Size = Vector2.new(2, barHeight); draw.HealthBar.Position = Vector2.new(pos.X - w/2 - 5, (pos.Y + h/2) - barHeight); draw.HealthBar.Color = Color3.fromHSV(healthPct * 0.3, 1, 1); draw.HealthBar.Visible = true
+                else draw.HealthOutline.Visible = false; draw.HealthBar.Visible = false end
+                if Config.ESP_Distance then
+                    draw.Distance.Text = "["..math.floor((Camera.CFrame.Position - root.Position).Magnitude).."m]"; draw.Distance.Position = Vector2.new(pos.X, pos.Y + h/2 + 5); draw.Distance.Visible = true
+                else draw.Distance.Visible = false end
+            else for _, obj in pairs(draw) do obj.Visible = false end end
+        else for _, obj in pairs(draw) do obj.Visible = false end end
+    end
+
+    -- COMBAT
+    if isRightClickHolding then
+        if Config.Triggerbot then
+            local t = Mouse.Target
+            if t and t.Parent and t:FindFirstAncestorOfClass("Model"):FindFirstChild("Humanoid") and t:FindFirstAncestorOfClass("Model") ~= LocalPlayer.Character then mouse1click() end
+        end
+        if Config.Aimbot then
+            local target, closest = nil, Config.FOV
+            for _, v in pairs(Players:GetPlayers()) do
+                if v ~= LocalPlayer and v.Character and v.Character:FindFirstChild("Head") then
+                    local pos, onScreen = Camera:WorldToViewportPoint(v.Character.Head.Position)
+                    if onScreen then
+                        local mag = (Vector2.new(pos.X, pos.Y) - mouseLoc).Magnitude
+                        if mag < closest then closest = mag target = v.Character.Head end
+                    end
+                end
+            end
+            if target then
+                local pos = Camera:WorldToViewportPoint(target.Position)
+                mousemoverel((pos.X - mouseLoc.X) * Config.Smooth, (pos.Y - mouseLoc.Y) * Config.Smooth)
+            end
+        end
+    end
+end)
